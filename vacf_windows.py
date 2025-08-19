@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-Streaming window-averaged VACF for large trajectories.
-- No per-particle VACF
-- No COM/drift correction
-- FFT-based Wiener–Khinchin per window
-- Reads whole atom set for each window (no batching)
-- Caps each window length at MAX_WINDOW_FRAMES (default 100,000)
-- Saves each window VACF to its own .txt for inspection
+streaming window-averaged VACF for large lammps velocity trajectories
+- no COM/drift corrections
+- FFT-based Wiener–Khinchin per window (for speed)
+- reads whole atom set for each window (no batching)
+- caps window length -> MAX_WINDOW_FRAMES (default 100,000)
+- individually saves each window VACF to its own .txt for inspection**** 
 """
 
 import argparse
@@ -16,7 +15,7 @@ import os
 MAX_WINDOW_FRAMES = 100_000  # hard cap on frames per window
 
 
-# ---------- Utilities ----------
+# functions for FFT transform for VACF calculation
 def _next_pow_two(n: int) -> int:
     return 1 << (n - 1).bit_length()
 
@@ -34,7 +33,7 @@ def vacf_total_fft(vel):
     return vacf_total
 
 
-# ---------- LAMMPS velocity reader ----------
+# reading in the lammpstrj velocity dump file (vx,vy,vz)
 def read_lammpstrj_velocities(files, start_frame, L, num_atoms, header_info):
     """Reads a block of L consecutive frames starting at start_frame."""
     vx_i, vy_i, vz_i = header_info["vx"], header_info["vy"], header_info["vz"]
@@ -136,14 +135,14 @@ def scan_first_frame(files):
     return num_atoms, total_frames, header_info
 
 
-# ---------- Window planning ----------
+# window averaging VACF settings
 def plan_windows(T, n_windows=5, overlap=0.5):
     """Plan windows with fractional overlap, capped at MAX_WINDOW_FRAMES."""
     n_windows = max(1, int(n_windows))
     overlap = float(np.clip(overlap, 0.0, 0.9))
     L = int(np.floor(T / (1.0 + (n_windows - 1) * (1.0 - overlap))))
     L = max(2, L)
-    L = min(L, MAX_WINDOW_FRAMES)  # cap window length
+    L = min(L, MAX_WINDOW_FRAMES)  # capping window length
     stride = max(1, int(round(L * (1.0 - overlap))))
     starts = [i * stride for i in range(n_windows)]
     if starts and starts[-1] + L > T:
@@ -155,7 +154,6 @@ def plan_windows(T, n_windows=5, overlap=0.5):
     return windows, L
 
 
-# ---------- Main ----------
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", nargs="+", required=True)
@@ -176,14 +174,14 @@ def main():
         vacf_w = vacf_total_fft(vel_block)
         vacf_windows.append(vacf_w)
 
-        # Save this window immediately
+        # save window immediately
         time_axis_w = np.arange(Lw) * args.dt * 10
         window_out = args.output.replace(".txt", f"_window{idx+1}.txt")
         np.savetxt(window_out, np.column_stack((time_axis_w, vacf_w)),
                    header=f"Time(fs)\tVACF_window{idx+1}")
         print(f"Saved VACF for window {idx+1} to {window_out}")
 
-    # Average across windows
+    # average all windows
     vacf_avg = np.mean(np.vstack(vacf_windows), axis=0)
     time_axis = np.arange(L) * args.dt * 10
     out_path = args.output.replace(".txt", "_windowavg.txt")
