@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-BASE_DIR="/scratch/hsg2ke/wca_fse/input"
+BASE_DIR="YOUR BASE DIRECTORY"
 MSD_DIR="${BASE_DIR}/msd"
 PYTHON_DIR="${BASE_DIR}/python"
 
@@ -57,7 +57,7 @@ for rep in {3..10}; do
 #SBATCH -N 1
 #SBATCH -n 4
 #SBATCH -t 6-00:00:00
-#SBATCH -A dubay-carney
+#SBATCH -A "YOUR ALLOCATIONS ACCOUNT"
 
 module load miniforge
 export PYTHONPATH="${PYTHON_DIR}:\$PYTHONPATH"
@@ -100,7 +100,7 @@ EOF
         fi
     done
 
-    # Optional post step (depends on all per-trial MSD jobs)
+    # post step (depends on all per-trial MSD jobs) (optional)
     if [ ${#job_ids[@]} -gt 0 ]; then
         DEPENDENCY=$(IFS=:; echo "${job_ids[*]}")
         SLURM_POST="${REP_DIR}/run_msd_post.slurm"
@@ -114,7 +114,7 @@ EOF
 #SBATCH -N 1
 #SBATCH -n 2
 #SBATCH -t 1-00:00:00
-#SBATCH -A dubay-carney
+#SBATCH -A "YOUR ALLOCATION ACCOUNT"
 #SBATCH --dependency=afterok:${DEPENDENCY}
 
 module load miniforge
