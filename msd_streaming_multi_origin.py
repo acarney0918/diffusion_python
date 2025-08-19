@@ -1,19 +1,14 @@
-# msd_streaming_multi_origin.py
 import numpy as np
 from math import gcd
 
-############################
-# Parsing & auto-detection #
-############################
-
 def detect_atoms_stride(file_paths):
     """
-    Scan dump headers to detect:
+    scan headers to detect:
       - natoms
-      - per-frame timesteps list (across files)
-      - inferred dump stride (GCD of timestep diffs, in MD steps)
-      - column indices for id,x,y,z (xu/yu/zu preferred; fallback x/y/z)
-    Only reads headers + counts; does not parse atom data payload fully.
+      - per-frame timesteps(across files)
+      - dump frequency/steps 
+      - column indices for id,x,y,z 
+    reads headers + counts; does NOT parse atom data fully
     """
     timesteps = []
     natoms_first = None
@@ -32,9 +27,8 @@ def detect_atoms_stride(file_paths):
                         timesteps.append(int(ts_line.strip()))
                     except ValueError:
                         pass
-                    # number of atoms
-                    # We expect the formal sequence, but be defensive:
-                    # keep reading until we hit "ITEM: NUMBER OF ATOMS"
+
+                    # keep reading until hit "ITEM: NUMBER OF ATOMS"
                     while True:
                         l2 = f.readline()
                         if not l2:
@@ -43,14 +37,14 @@ def detect_atoms_stride(file_paths):
                             nat = int(f.readline().strip())
                             if natoms_first is None:
                                 natoms_first = nat
-                            # skip box bounds section (typically 3 lines)
+                            # skip box bounds
                             while True:
                                 l3 = f.readline()
                                 if not l3:
                                     break
                                 if l3.startswith("ITEM: ATOMS"):
                                     headers = l3.strip().split()[2:]
-                                    # prefer unwrapped xu/yu/zu, else x/y/z
+                                    # unwrapped xu/yu/zu
                                     want = {}
                                     try:
                                         want['id'] = headers.index('id')
@@ -66,7 +60,7 @@ def detect_atoms_stride(file_paths):
                                         except ValueError:
                                             continue
                                     if cols is None:
-                                        raise ValueError("Dump must include either xu/yu/zu or x/y/z.")
+                                        raise ValueError("Dump must include xu/yu/zu or x/y/z.")
                                     # skip atom payload for this frame
                                     for _ in range(nat):
                                         f.readline()
@@ -83,9 +77,9 @@ def detect_atoms_stride(file_paths):
 
 def frame_reader(file_paths, natoms, cols, assume_sorted_by_id=True):
     """
-    Stream frames across files, yielding (frame_index, ids, coords3).
+    stream frames across files, yielding (frame_index, ids, coords3).
     coords3 is (natoms, 3) float64 array.
-    Assumes each frame begins with the standard LAMMPS headers.
+    assumes each frame begins with the standard LAMMPS headers.
     """
     k = 0
     for path in file_paths:
@@ -107,13 +101,13 @@ def frame_reader(file_paths, natoms, cols, assume_sorted_by_id=True):
                         nat = int(f.readline().strip())
                         if nat != natoms:
                             raise ValueError(f"natoms changed within files: {nat} vs {natoms}")
-                        # skip box bounds (3 lines typical; handle arbitrary count)
+
                         while True:
                             l3 = f.readline()
                             if not l3:
                                 break
                             if l3.startswith("ITEM: ATOMS"):
-                                # parse atom lines
+                                # go through atom lines
                                 ids = np.empty(natoms, dtype=np.int64)
                                 xyz = np.empty((natoms, 3), dtype=np.float64)
                                 id_i = cols['id']; x_i = cols['x']; y_i = cols['y']; z_i = cols['z']
@@ -139,7 +133,7 @@ def frame_reader(file_paths, natoms, cols, assume_sorted_by_id=True):
                         break
 
 ########################################
-# Streaming multi-origin MSD (1 pass)  #
+# Streaming multi-origin MSD           #
 ########################################
 
 def msd_streaming(file_paths,
@@ -149,14 +143,14 @@ def msd_streaming(file_paths,
                   desired_atom_id=1,
                   assume_sorted_by_id=True):
     """
-    Single-pass, memory-light MSD.
+    memory-light MSD.
     We keep <= max_active_origins origin frames. For each new frame, we
     update MSD(tau) where tau = current_k - origin_k for all active origins,
     for 1 <= tau <= max_tau_frames.
 
-    Returns: time_fs[1:K], msd[1:K], single_atom_msd[1:K], dump_stride
+    return: time_fs[1:K], msd[1:K], single_atom_msd[1:K], dump_stride
     """
-    # Auto-detect natoms and columns + dump stride
+    # auto-detect natoms and columns + dump stride
     natoms, dump_stride, cols = detect_atoms_stride(file_paths)
 
     # Output accumulators
@@ -165,27 +159,26 @@ def msd_streaming(file_paths,
     sum_msd_single = np.zeros(K + 1, dtype=np.float64)
     cnt = np.zeros(K + 1, dtype=np.int64)
 
-    # Origins management
     origins = []  # list of dicts: {'k':int, 'coords':(natoms,3), 'single':(3,), 'id_to_idx':optional}
-    # Choose origin insertion stride so that active origins <= max_active_origins
-    # Roughly keep ~max_active_origins origins spanning K frames:
+    # pick origin insertion stride so that active origins <= max_active_origins
+    # about keep ~max_active_origins origins spanning K frames:
     origin_stride = max(1, K // max_active_origins)
 
-    # Map desired atom id to index after we see first frame
+    # desired atom id index after we see first frame (if want single atom MSD)
     atom_index = None
 
     # Stream frames
     for k, ids, xyz in frame_reader(file_paths, natoms, cols, assume_sorted_by_id=assume_sorted_by_id):
         if atom_index is None:
             # ids are sorted; find index of desired atom quickly
-            # If desired id not present, default to 0 (first atom)
+            # desired id not present, default to 0 (first atom)
             loc = np.searchsorted(ids, desired_atom_id)
             if loc < len(ids) and ids[loc] == desired_atom_id:
                 atom_index = int(loc)
             else:
                 atom_index = 0
 
-        # Drop origins that are too old (tau > K)
+        # drop origins that are too old (tau > K)
         keep = []
         for org in origins:
             tau = k - org['k']
@@ -193,7 +186,7 @@ def msd_streaming(file_paths,
                 keep.append(org)
         origins = keep
 
-        # Possibly start a new origin at this frame
+        # attempt to start a new origin at this frame
         if (k % origin_stride) == 0:
             origins.append({
                 'k': k,
@@ -204,7 +197,7 @@ def msd_streaming(file_paths,
         if not origins:
             continue  # until we have the first origin
 
-        # Vectorized MSD update for all active origins
+        # vectorized MSD update for ALL active origins
         for org in origins:
             tau = k - org['k']
             if tau <= 0 or tau > K:
@@ -218,14 +211,13 @@ def msd_streaming(file_paths,
             sum_msd_single[tau] += s_msd_tau
             cnt[tau] += 1
 
-    # Finalize
     valid = cnt > 0
     msd = np.zeros_like(sum_msd)
     s_msd = np.zeros_like(sum_msd_single)
     msd[valid] = sum_msd[valid] / cnt[valid]
     s_msd[valid] = sum_msd_single[valid] / cnt[valid]
 
-    # Build time axis (skip tau=0)
+    # time axis (skip tau=0)
     time_fs = np.arange(len(msd), dtype=np.float64) * (timestep_fs * dump_stride)
     return time_fs[1:][valid[1:]], msd[1:][valid[1:]], s_msd[1:][valid[1:]], dump_stride
 
@@ -239,7 +231,8 @@ if __name__ == "__main__":
     file_paths = [
         "dump_unwrapped_stage1.lammpstrj"
     ]
-    # Tunables for huge runs:
+    # msd built for unwrapped dump coordinates of lammps MD run (.lammpstrj) for time averaged MSD -> diffusion analysis
+    # for huge runs:
     timestep_fs = 0.25
     max_tau_frames = 100_000      # longest lag to compute (frames)
     max_active_origins = 8        # memory knob (<=8 is usually plenty)
@@ -251,7 +244,7 @@ if __name__ == "__main__":
         max_tau_frames=max_tau_frames,
         max_active_origins=max_active_origins,
         desired_atom_id=desired_atom_id,
-        assume_sorted_by_id=True,   # set False if your dump isn't sorted by id
+        assume_sorted_by_id=True,   # set FALSE if your dump is NOT sorted by id
     )
 
     print(f"Inferred dump stride: {dump_stride} MD steps")
