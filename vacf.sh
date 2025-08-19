@@ -1,18 +1,18 @@
 #!/bin/bash
 set -euo pipefail
 
-BASE_DIR="/scratch/hsg2ke/wca_fse/input"
+BASE_DIR="YOUR BASE DIRECTORY"
 V2_DIR="${BASE_DIR}/v2"
 PYTHON_DIR="${BASE_DIR}/python"
 
-# Python scripts
+# python files
 VACF_SCRIPT="${PYTHON_DIR}/vacf_wca_windows.py"   # updated script that writes _windowN.txt + _windowavg.txt
 ANALYSIS_SCRIPT="${PYTHON_DIR}/vacf_analysis.py"
 DIFFUSION_SCRIPT="${PYTHON_DIR}/vacf_to_diffusion.py"
 
 mkdir -p "$V2_DIR"
 
-# Sanity checks
+# sanity checks
 for script in "$VACF_SCRIPT" "$ANALYSIS_SCRIPT" "$DIFFUSION_SCRIPT"; do
     if [ ! -f "$script" ]; then
         echo "Missing script: $script"
@@ -43,7 +43,7 @@ for rep in {3..10}; do
 #SBATCH -N 1
 #SBATCH -c 8
 #SBATCH -t 6-00:00:00
-#SBATCH -A dubay-carney
+#SBATCH -A "YOUR ALLOCATIONS ACCOUNT"
 
 module load miniforge
 cd "$TRIAL_DIR"
@@ -89,7 +89,7 @@ EOF
 #SBATCH -N 1
 #SBATCH -c 4
 #SBATCH -t 1-00:00:00
-#SBATCH -A dubay-carney
+#SBATCH -A "YOUR ALLOCATIONS ACCOUNT"
 #SBATCH --dependency=afterok:${DEPENDENCY}
 
 module load miniforge
@@ -103,7 +103,7 @@ cd "$BASE_DIR"
 # Aggregate and plot VACF curves across trials for this replicate
 python "$ANALYSIS_SCRIPT"
 
-# Compute diffusion coefficient from VACF via Green-Kubo relation
+# diffusion coefficient from VACF via Green-Kubo relation
 python "$DIFFUSION_SCRIPT"
 EOF
 
